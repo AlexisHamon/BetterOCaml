@@ -72,7 +72,7 @@ Build_Toplevel () {
     # Install dependencies
     echo "Installing dependencies ..."
     eval $(opam env)
-    opam install --yes js_of_ocaml js_of_ocaml-compiler js_of_ocaml-lwt js_of_ocaml-ppx js_of_ocaml-toplevel js_of_ocaml-tyxml graphics sedlex lwt ocp-indent base zarith zarith_stubs_js dune
+    opam install --yes core js_of_ocaml js_of_ocaml-compiler js_of_ocaml-lwt js_of_ocaml-ppx js_of_ocaml-toplevel js_of_ocaml-tyxml graphics sedlex lwt ocp-indent base zarith zarith_stubs_js dune
     eval $(opam env)
 
     # Build

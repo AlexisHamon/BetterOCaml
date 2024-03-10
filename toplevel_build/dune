@@ -12,6 +12,7 @@
     ;; not used directly
     str
     zarith
+    core
     dynlink
   )
   (flags 
@@ -43,6 +44,7 @@
       str
       dynlink
       zarith
+      core
     )
   )
 )
