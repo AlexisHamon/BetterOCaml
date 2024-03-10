@@ -19,4 +19,5 @@ To get help on the options provided by the compile script :
 
 ## Use the new compiled file
 To use the new compiled toplevel, copy the file 
-from `/toplevel_build/builds/` to `/src/toplevels/`
+from `/toplevel_build/builds/` to `/src/toplevels/` :
+`cp -r ./toplevel_build/builds/* ./src/toplevels/`
