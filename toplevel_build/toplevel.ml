@@ -216,7 +216,7 @@ module History = struct
   let push text =
     let _ = match Array.length !data, text with
      | _, "" -> ()
-     | 1, text -> if text <> "" then data := [| text ; "" |]; set_storage ();
+     | 1, text -> data := [| text ; "" |]; set_storage ();
      | _, text -> if text <> !data.(Array.length !data - 2) then
         data := Array.append !data [| "" |];
         !data.(Array.length !data - 2) <- text;
