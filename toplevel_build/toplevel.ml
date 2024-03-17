@@ -1,6 +1,5 @@
 open Js_of_ocaml
 open Js_of_ocaml_tyxml
-open Js_of_ocaml_toplevel
 open Lwt
 
 (* Global variables *)
@@ -16,23 +15,6 @@ let consolecaml_ppf = Format.formatter_of_out_channel consolecaml_chan
 let bincaml_chan = open_out "/dev/null3"
 let bincaml_ppf = Format.formatter_of_out_channel bincaml_chan
 
-(* Custom modules *)
-
-module Ppx_support = struct
-  let init () = Ast_mapper.register "js_of_ocaml" (fun _ -> Ppx_js.mapper)
-end
-
-module Version = struct
-  let from_string v = List.map int_of_string (String.split_on_char '.' v)
-  
-  let rec comp v v' = match v, v' with
-    | [], [] -> 0
-    | [], y::ys -> if y = 0 then comp [] ys else -1
-    | x::xs, [] -> if x = 0 then comp xs [] else 1
-    | x::xs, y::ys -> if x = y then comp xs ys else compare x y
-  
-  let current = from_string Sys.ocaml_version
-end
 
 (* General functions *)
 
@@ -66,26 +48,6 @@ let setup_pseudo_fs () =
   Sys_js.mount ~path:"/ftp/" (load_resource "ftp://");
   Sys_js.mount ~path:"/home/" (load_resource "filesys/")
 
-let exec' s =
-  let res : bool = JsooTop.use Format.std_formatter s in
-  if not res then Format.eprintf "error while evaluating %s@." s
-
-let setup_toplevel () =
-  JsooTop.initialize ();
-  Sys.interactive := false;
-  if Version.comp Version.current [ 4; 07 ] >= 0 then exec' "open Stdlib";
-  exec' "print_string (\"        OCaml version \" ^ Sys.ocaml_version);;";
-  exec' "#enable \"pretty\";;";
-  exec' "#disable \"shortvar\";;";
-  exec' "#directory \"/static\";;";
-  exec' "module Num = Big_int_Z;;";
-  Ppx_support.init ();
-  let[@alert "-deprecated"] new_directive n k = Hashtbl.add Toploop.directive_table n k in
-    new_directive
-    "load_js"
-    (Toploop.Directive_string (fun name -> Js.Unsafe.global##load_script_ name));
-  Sys.interactive := true;
-  ()
 
 let clear_toplevel () =
   (by_id "output")##.innerHTML := Js.string "";
@@ -93,7 +55,7 @@ let clear_toplevel () =
 
 let reset_toplevel () =
   (by_id "output")##.innerHTML := Js.string "";
-  setup_toplevel ();
+  Toplevel_backend.setup_toplevel ();
   ()
 
 let resize ~container ~textbox () =
@@ -152,9 +114,9 @@ let sanitize_command cmd =
 let execute_callback mode content =
   let content' = sanitize_command content in
   match mode with
-    |"internal" -> JsooTop.execute true ~pp_code:binsharp_ppf ~highlight_location bincaml_ppf content'
-    |"console" -> JsooTop.execute true ~pp_code:binsharp_ppf ~highlight_location consolecaml_ppf content'
-    |"toplevel" -> JsooTop.execute true ~pp_code:sharp_ppf ~highlight_location caml_ppf content';
+    |"internal" -> Toplevel_backend.execute true ~pp_code:binsharp_ppf ~highlight_location bincaml_ppf content'
+    |"console" -> Toplevel_backend.execute true ~pp_code:binsharp_ppf ~highlight_location consolecaml_ppf content'
+    |"toplevel" -> Toplevel_backend.execute true ~pp_code:sharp_ppf ~highlight_location caml_ppf content';
     |_ -> ()
 
 let run _ =
@@ -254,7 +216,7 @@ let run _ =
   in
   Sys_js.set_channel_filler stdin readline;
   setup_pseudo_fs ();
-  setup_toplevel ();
+  Toplevel_backend.setup_toplevel ();
   textbox##.value := Js.string ""
 
 
@@ -275,7 +237,7 @@ let _ =
     end);
   Js.Unsafe.global##.toplevelcallback := (object%js
       val setup = Js.wrap_meth_callback
-          (fun () -> setup_toplevel ())
+          (fun () -> Toplevel_backend.setup_toplevel ())
       val clear = Js.wrap_meth_callback
           (fun () -> clear_toplevel ())
       val reset = Js.wrap_meth_callback
