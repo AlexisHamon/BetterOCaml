@@ -184,61 +184,6 @@ module Version = struct
   let current = from_string Sys.ocaml_version
 end
 
-module History = struct
-  let data = ref [| "" |]
-  
-  let idx = ref 0
-  
-  let get_storage () =
-    match Js.Optdef.to_option Dom_html.window##.localStorage with
-    | exception _ -> raise Not_found
-    | None -> raise Not_found
-    | Some t -> t
-  
-  let set_storage () =
-    try
-      let s = get_storage () in
-      let str = Json.output !data in
-      s##setItem (Js.string "history") str
-    with Not_found -> ()
-  
-  let setup () =
-    try
-      let s = get_storage () in
-      match Js.Opt.to_option (s##getItem (Js.string "history")) with
-      | None -> raise Not_found
-      | Some s ->
-          let a = Json.unsafe_input s in
-          data := a;
-          idx := Array.length a - 1
-    with _ -> ()
-  
-  let push text =
-    let _ = match Array.length !data, text with
-     | _, "" -> ()
-     | 1, text -> data := [| text ; "" |]; set_storage ();
-     | _, text -> if text <> !data.(Array.length !data - 2) then
-        data := Array.append !data [| "" |];
-        !data.(Array.length !data - 2) <- text;
-        set_storage ();
-    in idx := Array.length !data - 1
-  
-  let current text = !data.(!idx) <- text
-  
-  let previous textbox =
-    if !idx > 0
-    then (
-      decr idx;
-      textbox##.value := Js.string !data.(!idx))
-  
-  let next textbox =
-    if !idx < Array.length !data - 1
-    then (
-      incr idx;
-      textbox##.value := Js.string !data.(!idx))
-end
-
-
 (* General functions *)
 
 let by_id s = Dom_html.getElementById s
@@ -366,10 +311,11 @@ let run _ =
   let container = by_id "toplevel-container" in
   let output = by_id "output" in
   let textbox : 'a Js.t = by_id_coerce "userinput" Dom_html.CoerceTo.textarea in
+  let h = ref (History.setup "base") in
   let execute () =
     let content = Js.to_string textbox##.value##trim in
     current_position := output##.childNodes##.length;
-    History.push content;
+    h := History.push !h content;
     textbox##.value := Js.string "";
     execute_callback "toplevel" content;
     resize ~container ~textbox () >>= fun () -> container##.scrollTop := container##.scrollHeight;
@@ -383,8 +329,8 @@ let run _ =
       let _ = String.index_from txt pos '\n' in
       Js._true
     with Not_found ->
-      History.current txt;
-      History.next textbox;
+      History.save_current !h txt;
+      h := History.next !h textbox;
       Js._false
   in
   let history_up _e =
@@ -395,8 +341,8 @@ let run _ =
       let _ = String.rindex_from txt pos '\n' in
       Js._true
     with Not_found ->
-      History.current txt;
-      History.previous textbox;
+      History.save_current !h txt;
+      h := History.previous !h textbox;
       Js._false
   in
   let meta e =
@@ -459,7 +405,6 @@ let run _ =
   Sys_js.set_channel_filler stdin readline;
   setup_pseudo_fs ();
   setup_toplevel ();
-  History.setup ();
   textbox##.value := Js.string ""
 
 
