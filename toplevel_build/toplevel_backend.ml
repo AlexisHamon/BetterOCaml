@@ -17,7 +17,7 @@ let setup_toplevel () =
   exec' "#enable \"pretty\";;";
   exec' "#disable \"shortvar\";;";
   exec' "#directory \"/static\";;";
-  exec' "module Num = Big_int_Z;;";
+  (* exec' "module Num = Big_int_Z;;"; **)
   Ppx_support.init ();
   let[@alert "-deprecated"] new_directive n k = Hashtbl.add Toploop.directive_table n k in
     new_directive
@@ -86,30 +86,128 @@ module JsooTopError = struct
     | _ -> None
 end
 
-exception RuntimeError
+let buffer = Buffer.create(100)
+let stdout_buffer = Buffer.create(100)
+let stderr_buffer = Buffer.create(100)
+let stdstr_buffer = Buffer.create(100)
+let formatter = Format.formatter_of_buffer buffer
+let stdstr_formatter = Format.formatter_of_buffer stdstr_buffer
+let stderr_formatter = Format.formatter_of_buffer stderr_buffer
 
-let execute printval ?pp_code ?highlight_location pp_answer s =
-  let lb = Lexing.from_function (refill_lexbuf s (ref 0) pp_code) in
-  (try
-     while true do
-       try
-         let phr = !Toploop.parse_toplevel_phrase lb in
-         let phr = JsooTopPpx.preprocess_phrase phr in
-         match Toploop.execute_phrase printval pp_answer phr with
-          | true  -> () 
-          | false ->  
-            Printf.eprintf "Uncaught exception: %s\n" (Printexc.to_string RuntimeError);
-            flush stderr
-       with
-       | End_of_file -> raise End_of_file
-       | x ->
-           (match highlight_location with
-           | None -> ()
-           | Some f -> (
-               match JsooTopError.loc x with
-               | None -> ()
-               | Some loc -> f loc));
-           Errors.report_error Format.err_formatter x
-     done
-   with End_of_file -> ());
-  flush_all ()
+let drainBuffer bf = 
+  let content = Buffer.contents(bf) in
+  Buffer.clear(bf);
+  content
+
+type report = {loc: Location.t option; code: string; value: string; stdout: string; stderr: string}
+
+let report ?loc ?value ?stdout ?stderr ?code () = 
+  {
+    loc    = loc;
+    code   = Option.value code   ~default:(drainBuffer stdstr_buffer);
+    value  = Option.value value  ~default:(drainBuffer buffer);
+    stdout = Option.value stdout ~default:(drainBuffer stdout_buffer);
+    stderr = Option.value stderr ~default:(drainBuffer stderr_buffer);
+  } 
+
+let parse_toplevel_phrase lexbuf =
+  try (Ok(!Toploop.parse_toplevel_phrase lexbuf)) with
+  | exn -> Error(exn)
+
+let execu_toplevel_phrase phrase =
+  try (Ok(Toploop.execute_phrase true formatter phrase)) with
+        | exn -> Error(exn) 
+
+module List = struct
+  include List
+  let ls l = 
+    match List.last l with
+      | Some v -> v
+      | None   -> raise (Failure "L'élément n'a pas été trouvé !")
+end
+
+
+let loc_of_phrase phrase = 
+  match phrase with
+    | Parsetree.Ptop_def [] | Ptop_dir _ -> None
+    | Parsetree.Ptop_def l  -> 
+      let loc = {
+          Location.loc_start = (List.hd l).pstr_loc.loc_start;
+          Location.loc_end   = (List.ls l).pstr_loc.loc_end;
+          Location.loc_ghost = false } in 
+      Some loc
+
+exception RuntimeError
+let eval code =
+  Buffer.clear buffer;
+  Buffer.clear stderr_buffer;
+  Buffer.clear stdout_buffer;
+  Buffer.clear stdstr_buffer;
+  
+  (* let lexbuf = Lexing.from_string code in *)
+  let lexbuf = Lexing.from_function (refill_lexbuf code (ref 0) (Some stdstr_formatter)) in
+  Location.input_lexbuf := Some lexbuf;
+  let rec run out_messages =
+    Buffer.clear stdstr_buffer;
+    match parse_toplevel_phrase lexbuf with
+      | Error End_of_file -> out_messages
+      | Error exn -> 
+        Errors.report_error stderr_formatter exn;
+        begin match JsooTopError.loc exn with
+          | None -> Error (exn, report ()) :: out_messages
+          | Some loc -> Error (exn, report ~loc:loc ()) :: out_messages
+        end
+      | Ok ph ->
+        Buffer.clear buffer;
+        Buffer.clear stderr_buffer;
+        Buffer.clear stdout_buffer;
+
+        (* Pprintast.top_phrase stdstr_formatter ph; *)
+        let loc = loc_of_phrase ph in 
+    
+        let ph = JsooTopPpx.preprocess_phrase ph in
+          
+        match execu_toplevel_phrase ph with
+        | Ok(true) ->
+          run ((Ok (report ?loc:loc ())) :: out_messages)
+        
+        | Ok(false) ->
+          run ((Error (RuntimeError, report ?loc:loc ~stderr:"Uncaught exception: RuntimeError" ())) :: out_messages)
+        | Error(Sys.Break) -> (Error (Sys.Break, report ?loc:None ~stderr:"Interupted" ())) :: out_messages
+        | Error(exn) -> 
+          Errors.report_error stderr_formatter exn;
+          (Error (exn, report ?loc:(JsooTopError.loc exn) ())) :: out_messages
+        in List.rev (run [])
+        
+
+let execute ~pp_code ?highlight_location pp_answer s =
+  let response = eval s in
+
+  let fflush_all () = 
+    Format.pp_print_flush pp_code ();
+    Format.pp_print_flush pp_answer ();
+    Format.pp_print_flush Format.std_formatter ();
+    Format.pp_print_flush Format.err_formatter () in
+
+  let try_apply f_opt x_opt = 
+    match f_opt, x_opt with
+      | None, _ | _, None -> ()
+      | Some f, Some x -> f x in
+  let aux element =
+    (match element with
+      | Ok {value=value; code=code; _} -> 
+        Format.fprintf pp_code "%s" code; 
+        Format.fprintf pp_answer "%s" value;
+        fflush_all ();
+      | Error (_exn, {loc=loc; value=value; stdout=_stdout; stderr=stderr; code=code}) ->
+        Format.fprintf pp_code "%s" code;
+        Format.fprintf pp_answer "%s" value;
+        fflush_all ();
+        Format.fprintf Format.err_formatter "%s" stderr;
+        fflush_all ();
+        try_apply highlight_location loc
+    ) in
+    List.iter ~f:aux response
+      
+  
+ 

@@ -112,11 +112,13 @@ let sanitize_command cmd =
     else cmd
 
 let execute_callback mode content =
+  let output = by_id "output" in
+  current_position := output##.childNodes##.length;
   let content' = sanitize_command content in
   match mode with
-    |"internal" -> Toplevel_backend.execute true ~pp_code:binsharp_ppf ~highlight_location bincaml_ppf content'
-    |"console" -> Toplevel_backend.execute true ~pp_code:binsharp_ppf ~highlight_location consolecaml_ppf content'
-    |"toplevel" -> Toplevel_backend.execute true ~pp_code:sharp_ppf ~highlight_location caml_ppf content';
+    |"internal" -> Toplevel_backend.execute ~pp_code:binsharp_ppf ~highlight_location bincaml_ppf content'
+    |"console" -> Toplevel_backend.execute ~pp_code:binsharp_ppf ~highlight_location consolecaml_ppf content'
+    |"toplevel" -> Toplevel_backend.execute ~pp_code:sharp_ppf ~highlight_location caml_ppf content';
     |_ -> ()
 
 let run _ =
@@ -126,7 +128,6 @@ let run _ =
   let h = ref (History.setup "base") in
   let execute () =
     let content = Js.to_string textbox##.value##trim in
-    current_position := output##.childNodes##.length;
     h := History.push !h content;
     textbox##.value := Js.string "";
     execute_callback "toplevel" content;
