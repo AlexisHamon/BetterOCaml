@@ -2,19 +2,6 @@ open Js_of_ocaml
 open Js_of_ocaml_tyxml
 open Lwt
 
-(* Global variables *)
-
-let sharp_chan = open_out "/dev/null0"
-let sharp_ppf = Format.formatter_of_out_channel sharp_chan
-let caml_chan = open_out "/dev/null1"
-let caml_ppf = Format.formatter_of_out_channel caml_chan
-let binsharp_chan = open_out "/dev/null2"
-let binsharp_ppf = Format.formatter_of_out_channel binsharp_chan
-let consolecaml_chan = open_out "/dev/null3"
-let consolecaml_ppf = Format.formatter_of_out_channel consolecaml_chan
-let bincaml_chan = open_out "/dev/null3"
-let bincaml_ppf = Format.formatter_of_out_channel bincaml_chan
-
 
 (* General functions *)
 
@@ -47,16 +34,6 @@ let setup_pseudo_fs () =
   Sys_js.mount ~path:"/https/" (load_resource "https://");
   Sys_js.mount ~path:"/ftp/" (load_resource "ftp://");
   Sys_js.mount ~path:"/home/" (load_resource "filesys/")
-
-
-let clear_toplevel () =
-  (by_id "output")##.innerHTML := Js.string "";
-  ()
-
-let reset_toplevel () =
-  (by_id "output")##.innerHTML := Js.string "";
-  Toplevel_backend.setup_toplevel ();
-  ()
 
 let resize ~container ~textbox () =
   Lwt.pause ()
@@ -111,19 +88,56 @@ let sanitize_command cmd =
     then cmd ^ ";"
     else cmd
 
+let string_to_void (_:string) : unit = ()
+
+let execute_toplevel = 
+  let output = by_id "output" in
+  Toplevel_backend.execute
+    ~pp_code:  (append Colorize.ocaml output "sharp")
+    ~pp_value: (append Colorize.ocaml output "caml")
+    ~pp_stdout:(append Colorize.text output "stdout")
+    ~pp_stderr:(append Colorize.text output "stderr")
+    ~highlight_location
+
+let clear_toplevel () =
+  (by_id "output")##.innerHTML := Js.string "";
+  ()
+
+let reset_toplevel () =
+  clear_toplevel ();
+  Toplevel_backend.setup_toplevel execute_toplevel;
+  ()
+
 let execute_callback mode content =
   let output = by_id "output" in
   current_position := output##.childNodes##.length;
   let content' = sanitize_command content in
   match mode with
-    |"internal" -> Toplevel_backend.execute ~pp_code:binsharp_ppf ~highlight_location bincaml_ppf content'
-    |"console" -> Toplevel_backend.execute ~pp_code:binsharp_ppf ~highlight_location consolecaml_ppf content'
-    |"toplevel" -> Toplevel_backend.execute ~pp_code:sharp_ppf ~highlight_location caml_ppf content';
+    |"internal" -> 
+    Toplevel_backend.execute 
+      ~pp_code:  string_to_void
+      ~pp_value: string_to_void
+      ~pp_stdout:(append Colorize.text output "stdout")
+      ~pp_stderr:(append Colorize.text output "stderr")
+      ~highlight_location content'
+    |"console"  -> 
+    Toplevel_backend.execute 
+      ~pp_code:  string_to_void
+      ~pp_value: append_to_console
+      ~pp_stdout:(append Colorize.text output "stdout")
+      ~pp_stderr:(append Colorize.text output "stderr")
+      ~highlight_location content'
+    |"toplevel" -> 
+    Toplevel_backend.execute
+      ~pp_code:  (append Colorize.ocaml output "sharp")
+      ~pp_value: (append Colorize.ocaml output "caml")
+      ~pp_stdout:(append Colorize.text output "stdout")
+      ~pp_stderr:(append Colorize.text output "stderr")
+      ~highlight_location content'
     |_ -> ()
 
 let run _ =
   let container = by_id "toplevel-container" in
-  let output = by_id "output" in
   let textbox : 'a Js.t = by_id_coerce "userinput" Dom_html.CoerceTo.textarea in
   let h = ref (History.setup "base") in
   let execute () =
@@ -204,11 +218,6 @@ let run _ =
       >>= fun () ->
       textbox##focus;
       Lwt.return_unit);
-  Sys_js.set_channel_flusher caml_chan (append Colorize.ocaml output "caml");
-  Sys_js.set_channel_flusher sharp_chan (append Colorize.ocaml output "sharp");
-  Sys_js.set_channel_flusher stdout (append Colorize.text output "stdout");
-  Sys_js.set_channel_flusher stderr (append Colorize.text output "stderr");
-  Sys_js.set_channel_flusher consolecaml_chan append_to_console;
   let readline () =
     Js.Opt.case
       (Dom_html.window##prompt (Js.string "The toplevel expects inputs:") (Js.string ""))
@@ -217,7 +226,7 @@ let run _ =
   in
   Sys_js.set_channel_filler stdin readline;
   setup_pseudo_fs ();
-  Toplevel_backend.setup_toplevel ();
+  Toplevel_backend.setup_toplevel execute_toplevel;
   textbox##.value := Js.string ""
 
 
@@ -238,7 +247,7 @@ let _ =
     end);
   Js.Unsafe.global##.toplevelcallback := (object%js
       val setup = Js.wrap_meth_callback
-          (fun () -> Toplevel_backend.setup_toplevel ())
+          (fun () -> Toplevel_backend.setup_toplevel execute_toplevel)
       val clear = Js.wrap_meth_callback
           (fun () -> clear_toplevel ())
       val reset = Js.wrap_meth_callback

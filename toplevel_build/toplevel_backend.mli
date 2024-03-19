@@ -1,8 +1,10 @@
-val setup_toplevel : unit -> unit
+val setup_toplevel : (string -> unit) -> unit
 
 val execute : 
-    pp_code:Format.formatter ->
+    pp_code:  (string -> unit) ->
+    pp_value: (string -> unit) ->
+    pp_stdout:(string -> unit) ->
+    pp_stderr:(string -> unit) ->
     ?highlight_location:(Warnings.loc -> unit) ->
-    Format.formatter ->
     string ->
     unit

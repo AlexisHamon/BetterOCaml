@@ -1,30 +1,18 @@
 open Js_of_ocaml
 open Js_of_ocaml_toplevel
 
+let buffer = Buffer.create(100)
+let stdout_buffer = Buffer.create(100)
+let stderr_buffer = Buffer.create(100)
+let stdstr_buffer = Buffer.create(100)
+let formatter = Format.formatter_of_buffer buffer
+let stdstr_formatter = Format.formatter_of_buffer stdstr_buffer
+let stderr_formatter = Format.formatter_of_buffer stderr_buffer
+
+
 module Ppx_support = struct
   let init () = Ast_mapper.register "js_of_ocaml" (fun _ -> Ppx_js.mapper)
 end
-
-let exec' s =
-  let res : bool = JsooTop.use Format.std_formatter s in
-  if not res then Format.eprintf "error while evaluating %s@." s
-
-let setup_toplevel () =
-  JsooTop.initialize ();
-  Sys.interactive := false;
-  if Version.comp Version.current [ 4; 07 ] >= 0 then exec' "open Stdlib";
-  exec' "print_string (\"        OCaml version \" ^ Sys.ocaml_version);;";
-  exec' "#enable \"pretty\";;";
-  exec' "#disable \"shortvar\";;";
-  exec' "#directory \"/static\";;";
-  (* exec' "module Num = Big_int_Z;;"; **)
-  Ppx_support.init ();
-  let[@alert "-deprecated"] new_directive n k = Hashtbl.add Toploop.directive_table n k in
-    new_directive
-    "load_js"
-    (Toploop.Directive_string (fun name -> Js.Unsafe.global##load_script_ name));
-  Sys.interactive := true;
-  ()
 
 open Js_of_ocaml_compiler.Stdlib
 
@@ -86,13 +74,6 @@ module JsooTopError = struct
     | _ -> None
 end
 
-let buffer = Buffer.create(100)
-let stdout_buffer = Buffer.create(100)
-let stderr_buffer = Buffer.create(100)
-let stdstr_buffer = Buffer.create(100)
-let formatter = Format.formatter_of_buffer buffer
-let stdstr_formatter = Format.formatter_of_buffer stdstr_buffer
-let stderr_formatter = Format.formatter_of_buffer stderr_buffer
 
 let drainBuffer bf = 
   let content = Buffer.contents(bf) in
@@ -116,7 +97,7 @@ let parse_toplevel_phrase lexbuf =
 
 let execu_toplevel_phrase phrase =
   try (Ok(Toploop.execute_phrase true formatter phrase)) with
-        | exn -> Error(exn) 
+        | exn -> Error(exn)
 
 module List = struct
   include List
@@ -179,15 +160,18 @@ let eval code =
           (Error (exn, report ?loc:(JsooTopError.loc exn) ())) :: out_messages
         in List.rev (run [])
         
+let eval_silent ev s = 
+  ev s
 
-let execute ~pp_code ?highlight_location pp_answer s =
+let execute ~pp_code ~pp_value ~pp_stdout ~pp_stderr ?highlight_location s =
   let response = eval s in
 
-  let fflush_all () = 
-    Format.pp_print_flush pp_code ();
-    Format.pp_print_flush pp_answer ();
-    Format.pp_print_flush Format.std_formatter ();
-    Format.pp_print_flush Format.err_formatter () in
+  let pp_report (report: report) =
+    let {code=code; value=value; stdout=stdout; stderr=stderr; _} = report in
+    if (String.length code > 0)   then pp_code   code;
+    if (String.length value > 0)  then pp_value  value;
+    if (String.length stdout > 0) then pp_stdout stdout;
+    if (String.length stderr > 0) then pp_stderr stderr in
 
   let try_apply f_opt x_opt = 
     match f_opt, x_opt with
@@ -195,19 +179,35 @@ let execute ~pp_code ?highlight_location pp_answer s =
       | Some f, Some x -> f x in
   let aux element =
     (match element with
-      | Ok {value=value; code=code; _} -> 
-        Format.fprintf pp_code "%s" code; 
-        Format.fprintf pp_answer "%s" value;
-        fflush_all ();
-      | Error (_exn, {loc=loc; value=value; stdout=_stdout; stderr=stderr; code=code}) ->
-        Format.fprintf pp_code "%s" code;
-        Format.fprintf pp_answer "%s" value;
-        fflush_all ();
-        Format.fprintf Format.err_formatter "%s" stderr;
-        fflush_all ();
-        try_apply highlight_location loc
+      | Ok report -> pp_report report
+      | Error (_exn, report) ->
+        pp_report report;
+        try_apply highlight_location report.loc
     ) in
     List.iter ~f:aux response
-      
+
+
+let setup_toplevel ev =
+  JsooTop.initialize ();
+
+  Format.pp_set_margin formatter 80;
+  Format.pp_set_max_indent formatter 70;
+  Sys_js.set_channel_flusher stdout (Buffer.add_string stdout_buffer);
+  Sys_js.set_channel_flusher stderr (Buffer.add_string stderr_buffer);
+
+  Sys.interactive := false;
+  if Version.comp Version.current [ 4; 07 ] >= 0 then eval_silent ev "open Stdlib;;";
+  eval_silent ev "print_string (\"        OCaml version \" ^ Sys.ocaml_version);;";
+  eval_silent ev"#enable \"pretty\";;";
+  eval_silent ev "#disable \"shortvar\";;";
+  eval_silent ev "#directory \"/static\";;";
+  (* exec' "module Num = Big_int_Z;;"; **)
+  Ppx_support.init ();
+  let[@alert "-deprecated"] new_directive n k = Hashtbl.add Toploop.directive_table n k in
+    new_directive
+    "load_js"
+    (Toploop.Directive_string (fun name -> Js.Unsafe.global##load_script_ name));
+  Sys.interactive := true;
+  ()
   
  
