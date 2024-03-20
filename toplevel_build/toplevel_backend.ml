@@ -133,7 +133,7 @@ let eval code =
     match parse_toplevel_phrase lexbuf with
       | Error End_of_file -> out_messages
       | Error exn -> 
-        Errors.report_error stderr_formatter exn;
+        Location.report_exception stderr_formatter exn;
         begin match JsooTopError.loc exn with
           | None -> Error (exn, report ()) :: out_messages
           | Some loc -> Error (exn, report ~loc:loc ()) :: out_messages
@@ -156,7 +156,7 @@ let eval code =
           run ((Error (RuntimeError, report ?loc:loc ~stderr:"Uncaught exception: RuntimeError" ())) :: out_messages)
         | Error(Sys.Break) -> (Error (Sys.Break, report ?loc:None ~stderr:"Interupted" ())) :: out_messages
         | Error(exn) -> 
-          Errors.report_error stderr_formatter exn;
+          Location.report_exception stderr_formatter exn;
           (Error (exn, report ?loc:(JsooTopError.loc exn) ())) :: out_messages
         in List.rev (run [])
         
