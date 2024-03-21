@@ -4,9 +4,7 @@ open Js_of_ocaml_toplevel
 let buffer = Buffer.create(100)
 let stdout_buffer = Buffer.create(100)
 let stderr_buffer = Buffer.create(100)
-let stdstr_buffer = Buffer.create(100)
 let formatter = Format.formatter_of_buffer buffer
-let stdstr_formatter = Format.formatter_of_buffer stdstr_buffer
 let stderr_formatter = Format.formatter_of_buffer stderr_buffer
 
 
@@ -37,16 +35,13 @@ let refill_lexbuf s p ppf buffer len =
       try String.index_from s !p '\n' - !p + 1, false
       with _ -> String.length s - !p, true
     in
-    let len'' = min len len' in
+    let len'' = min len len' in begin
     Bytes.blit_string ~src:s ~src_pos:!p ~dst:buffer ~dst_pos:0 ~len:len'';
-    (match ppf with
-    | Some ppf ->
-        Format.fprintf ppf "%s" (Bytes.sub_string buffer ~pos:0 ~len:len'');
-        if nl then Format.pp_print_newline ppf ();
-        Format.pp_print_flush ppf ()
-    | None -> ());
+    let s = Bytes.sub_string buffer ~pos:0 ~len:len'' in
+    if nl then ppf (s^"\n") else ppf s;
     p := !p + len'';
     len''
+    end
 
 module JsooTopPpx = struct
   let ppx_rewriters = ref []
@@ -93,12 +88,12 @@ let drainBuffer bf =
   Buffer.clear(bf);
   content
 
-type report = {loc: Location.t option; code: string; value: string; stdout: string; stderr: string}
+type report = {loc: Location.t option; code: string list; value: string; stdout: string; stderr: string}
 
 let report ?loc ?value ?stdout ?stderr ?code () = 
   {
     loc    = loc;
-    code   = Option.value code   ~default:(drainBuffer stdstr_buffer);
+    code   = Option.value code   ~default:([]);
     value  = Option.value value  ~default:(drainBuffer buffer);
     stdout = Option.value stdout ~default:(drainBuffer stdout_buffer);
     stderr = Option.value stderr ~default:(drainBuffer stderr_buffer);
@@ -136,21 +131,22 @@ let eval code =
   Buffer.clear buffer;
   Buffer.clear stderr_buffer;
   Buffer.clear stdout_buffer;
-  Buffer.clear stdstr_buffer;
   warnings_l := [];
   
   (* let lexbuf = Lexing.from_string code in *)
-  let lexbuf = Lexing.from_function (refill_lexbuf code (ref 0) (Some stdstr_formatter)) in
+  let code_s = ref [] in
+  let ppf s = code_s := s :: !code_s in
+  let rd_cd () = let v = !code_s in code_s := []; v in 
+  let lexbuf = Lexing.from_function (refill_lexbuf code (ref 0) ppf) in
   Location.input_lexbuf := Some lexbuf;
   let rec run out_messages =
-    Buffer.clear stdstr_buffer;
     match parse_toplevel_phrase lexbuf with
       | Error End_of_file -> out_messages
       | Error exn ->
         Errors.report_error stderr_formatter exn;
         begin match JsooTopError.loc exn with
-          | None -> Error (exn, report ()) :: out_messages
-          | Some loc -> Error (exn, report ~loc:loc ()) :: out_messages
+          | None -> Error (exn, report ~code:(rd_cd ()) ()) :: out_messages
+          | Some loc -> Error (exn, report ~code:(rd_cd ()) ~loc:loc ()) :: out_messages
         end
       | Ok ph ->
         Buffer.clear buffer;
@@ -164,14 +160,14 @@ let eval code =
           
         match execu_toplevel_phrase ph with
         | Ok(true) ->
-          run ((Ok (report ?loc:loc ())) :: out_messages)
+          run ((Ok (report ~code:(rd_cd ()) ?loc:loc ())) :: out_messages)
         
         | Ok(false) ->
-          run ((Error (RuntimeError, report ?loc:loc ~stderr:"Uncaught exception: RuntimeError" ())) :: out_messages)
-        | Error(Sys.Break) -> (Error (Sys.Break, report ?loc:None ~stderr:"Interupted" ())) :: out_messages
+          run ((Error (RuntimeError, report ~code:(rd_cd ()) ?loc:loc ~stderr:"Uncaught exception: RuntimeError" ())) :: out_messages)
+        | Error(Sys.Break) -> (Error (Sys.Break, report ~code:(rd_cd ()) ?loc:None ~stderr:"Interupted" ())) :: out_messages
         | Error(exn) ->
           let _ = try Errors.report_error stderr_formatter exn with _ -> () in
-          (Error (exn, report ?loc:(JsooTopError.loc exn) ())) :: out_messages
+          (Error (exn, report ~code:(rd_cd ()) ?loc:(JsooTopError.loc exn) ())) :: out_messages
         in List.rev (run [])
         
 let eval_silent ev s = 
@@ -182,7 +178,7 @@ let execute ~pp_code ~pp_value ~pp_stdout ~pp_stderr ?highlight_location s =
 
   let pp_report (report: report) =
     let {code=code; value=value; stdout=stdout; stderr=stderr; _} = report in
-    if (String.length code > 0)   then pp_code   code;
+    List.iter ~f:(fun s -> if (String.length s > 0) then pp_code s) (List.rev code);
     if (String.length value > 0)  then pp_value  value;
     if (String.length stdout > 0) then pp_stdout stdout;
     if (String.length stderr > 0) then pp_stderr stderr in
@@ -225,4 +221,3 @@ let setup_toplevel ev =
   Sys.interactive := true;
   ()
   
- 
