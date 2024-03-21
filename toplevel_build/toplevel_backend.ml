@@ -10,6 +10,19 @@ let stdstr_formatter = Format.formatter_of_buffer stdstr_buffer
 let stderr_formatter = Format.formatter_of_buffer stderr_buffer
 
 
+let warnings_l = ref []
+
+let () =
+  Location.warning_reporter :=
+    (fun loc w ->
+       match Warnings.report w with
+       | `Inactive -> Location.default_warning_reporter loc w
+       | `Active { Warnings.id = _; message; is_error = _; sub_locs } ->
+           let r = (loc, message), sub_locs in
+           warnings_l := r :: !warnings_l;
+           Location.default_warning_reporter loc w)
+
+
 module Ppx_support = struct
   let init () = Ast_mapper.register "js_of_ocaml" (fun _ -> Ppx_js.mapper)
 end
@@ -124,6 +137,7 @@ let eval code =
   Buffer.clear stderr_buffer;
   Buffer.clear stdout_buffer;
   Buffer.clear stdstr_buffer;
+  warnings_l := [];
   
   (* let lexbuf = Lexing.from_string code in *)
   let lexbuf = Lexing.from_function (refill_lexbuf code (ref 0) (Some stdstr_formatter)) in
@@ -132,8 +146,8 @@ let eval code =
     Buffer.clear stdstr_buffer;
     match parse_toplevel_phrase lexbuf with
       | Error End_of_file -> out_messages
-      | Error exn -> 
-        Location.report_exception stderr_formatter exn;
+      | Error exn ->
+        Errors.report_error stderr_formatter exn;
         begin match JsooTopError.loc exn with
           | None -> Error (exn, report ()) :: out_messages
           | Some loc -> Error (exn, report ~loc:loc ()) :: out_messages
@@ -155,8 +169,8 @@ let eval code =
         | Ok(false) ->
           run ((Error (RuntimeError, report ?loc:loc ~stderr:"Uncaught exception: RuntimeError" ())) :: out_messages)
         | Error(Sys.Break) -> (Error (Sys.Break, report ?loc:None ~stderr:"Interupted" ())) :: out_messages
-        | Error(exn) -> 
-          Location.report_exception stderr_formatter exn;
+        | Error(exn) ->
+          let _ = try Errors.report_error stderr_formatter exn with _ -> () in
           (Error (exn, report ?loc:(JsooTopError.loc exn) ())) :: out_messages
         in List.rev (run [])
         
@@ -173,18 +187,19 @@ let execute ~pp_code ~pp_value ~pp_stdout ~pp_stderr ?highlight_location s =
     if (String.length stdout > 0) then pp_stdout stdout;
     if (String.length stderr > 0) then pp_stderr stderr in
 
-  let try_apply f_opt x_opt = 
+  let try_apply f_opt t x_opt = 
     match f_opt, x_opt with
       | None, _ | _, None -> ()
-      | Some f, Some x -> f x in
+      | Some f, Some x -> f t x in
   let aux element =
     (match element with
       | Ok report -> pp_report report
       | Error (_exn, report) ->
         pp_report report;
-        try_apply highlight_location report.loc
+        try_apply highlight_location Colorize.Highlight_error report.loc
     ) in
-    List.iter ~f:aux response
+    List.iter ~f:aux response;
+    List.iter ~f:(fun ((loc, _), _) -> try_apply highlight_location Colorize.Highlight_warning (Some loc)) (!warnings_l)
 
 
 let setup_toplevel ev =
@@ -198,7 +213,7 @@ let setup_toplevel ev =
   Sys.interactive := false;
   if Version.comp Version.current [ 4; 07 ] >= 0 then eval_silent ev "open Stdlib;;";
   eval_silent ev "print_string (\"        OCaml version \" ^ Sys.ocaml_version);;";
-  eval_silent ev"#enable \"pretty\";;";
+  eval_silent ev "#enable \"pretty\";;";
   eval_silent ev "#disable \"shortvar\";;";
   eval_silent ev "#directory \"/static\";;";
   (* exec' "module Num = Big_int_Z;;"; **)

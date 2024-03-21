@@ -53,7 +53,7 @@ let rec iter_on_sharp ~f x =
 
 let current_position = ref 0
 
-let highlight_location loc =
+let highlight_location t loc =
   let x = ref 0 in
   let output = by_id "output" in
   let first =
@@ -67,7 +67,7 @@ let highlight_location loc =
       then
         let from_ = if !x = line1 then `Pos col1 else `Pos 0 in
         let to_ = if !x = line2 then `Pos col2 else `Last in
-        Colorize.highlight from_ to_ e)
+        Colorize.highlight from_ to_ e t)
 
 let append colorize output cl (s:string) =
   if String.length s > 0 then

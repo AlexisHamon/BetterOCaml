@@ -38,6 +38,10 @@
     --code-text-color: white;
     --code-caml:rgb(110, 110, 201);
     --code-error:#d9534f;
+    /* WRONG COLORS */
+    --code-warning:#fd971f;
+    --code-alert:#e6db74;
+    /* WRONG COLORS */
     --code-string:#e6db74;
     --code-number:#ae81ff;
     --code-constant:#66d9ef;

@@ -190,7 +190,7 @@ nav i, nav i.material-icons {
 
 /* TOPLEVEL */
 
-.errorloc {
+.errorloc, .warningloc, .alertloc {
     border-bottom-width: 3px;
     border-bottom-style: solid;
 }
@@ -596,6 +596,14 @@ label {
 
 .errorloc {
     border-bottom-color: var(--code-error);
+}
+
+.warningloc {
+    border-bottom-color: var(--code-warning);
+}
+
+.alertloc {
+    border-bottom-color: var(--code-alert);
 }
 
 .sharp .id {

@@ -73,7 +73,13 @@ let ocaml ~a_class:cl s =
   in
   Tyxml_js.Html.(div ~a:[ a_class [ cl ] ] (iter []))
   
-let highlight (`Pos from_) to_ e =
+type highlight_type = Highlight_error | Highlight_warning | Highlight_alert
+let string_of_highlight = function 
+  | Highlight_error -> "errorloc"
+  | Highlight_warning -> "warningloc"
+  | Highlight_alert -> "alertloc"
+
+let highlight (`Pos from_) to_ e t =
   let _ =
     List.fold_left
       (fun pos e ->
@@ -82,7 +88,7 @@ let highlight (`Pos from_) to_ e =
         | Some e ->
             let size = Js.Opt.case e##.textContent (fun () -> 0) (fun t -> t##.length) in
             if pos + size > from_ && (to_ = `Last || `Pos pos < to_)
-            then e##.classList##add (Js.string "errorloc");
+            then e##.classList##add (Js.string (string_of_highlight t));
             pos + size)
       0
       (Dom.list_of_nodeList e##.childNodes)
