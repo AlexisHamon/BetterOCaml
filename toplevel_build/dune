@@ -59,7 +59,7 @@
       --export %{dep:export.txt}
       --toplevel
       --opt 3
-      --enable=effects
+      ;; --enable=effects
       %{dep:toplevel.bc}
       -o %{targets}
     )
